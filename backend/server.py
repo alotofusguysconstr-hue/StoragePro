@@ -526,8 +526,11 @@ async def get_stats():
         "analyzed_at": {"$gte": today_start.isoformat()}
     })
     
-    # Calculate potential profit from my bids
-    my_bids = await db.my_bids.find({}, {"_id": 0}).to_list(100)
+    # Calculate potential profit from my bids (only fetch required fields for performance)
+    my_bids = await db.my_bids.find(
+        {}, 
+        {"_id": 0, "optimizer_analysis.final_recommendation.expected_profit": 1}
+    ).to_list(100)
     potential_profit = 0
     for bid in my_bids:
         optimizer = bid.get("optimizer_analysis", {})
