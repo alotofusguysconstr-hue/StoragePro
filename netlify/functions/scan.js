@@ -1,54 +1,62 @@
 // netlify/functions/scan.js
-// This handles POST requests to /api/scan
+exports.handler = async (event) => {
+  // Allow CORS for preview environments
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Content-Type': 'application/json'
+  };
 
-exports.handler = async (event, context) => {
-  // Only allow POST requests
-  if (event.httpMethod !== "POST") {
+  // Handle preflight OPTIONS request
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers };
+  }
+
+  if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
-      body: JSON.stringify({ error: "Method not allowed" }),
+      headers,
+      body: JSON.stringify({ error: 'Method not allowed' })
     };
   }
 
   try {
-    // Parse the request body
-    const body = JSON.parse(event.body || "{}");
-    const { urls, state_filter, county_filter, use_vision = true } = body;
+    const body = JSON.parse(event.body || '{}');
+    const { urls = [], state_filter = '', county_filter = '' } = body;
 
-    if (!urls || !Array.isArray(urls) || urls.length === 0) {
+    if (!urls || urls.length === 0) {
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: "No valid URLs provided" }),
+        headers,
+        body: JSON.stringify({ error: 'No URLs provided' })
       };
     }
 
-    // Placeholder response for now (we'll add real scraping + AI later)
-    const analyzed = urls.length;
-    
+    // Placeholder response - this proves the function is working
     return {
       statusCode: 200,
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({
-        analyzed: analyzed,
+        analyzed: urls.length,
         duplicates: 0,
-        results: [],                    // We'll fill this later
+        results: [],
         duplicate_warnings: [],
-        message: "Scan completed successfully (placeholder)",
+        message: "✅ Scan function is now working (placeholder)",
         analyzed_urls: urls,
-        state_filter: state_filter || null,
-        county_filter: county_filter || null,
-      }),
+        state_filter,
+        county_filter
+      })
     };
   } catch (error) {
-    console.error("Scan function error:", error);
+    console.error('Scan handler error:', error);
     return {
       statusCode: 500,
+      headers,
       body: JSON.stringify({
-        error: "Internal server error",
-        message: error.message,
-      }),
+        error: 'Internal server error',
+        message: error.message
+      })
     };
   }
 };
