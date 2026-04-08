@@ -1,18 +1,19 @@
 // LocalStorage utility functions for StorageHunter Pro
+// Now also includes API integration
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
 
 const STORAGE_KEYS = {
   ADMIN_PIN: 'sh_admin_pin',
   SETTINGS: 'sh_settings',
-  UNITS: 'sh_units',
-  MY_BIDS: 'sh_my_bids',
-  PUBLISH_QUEUE: 'sh_publish_queue',
   HOT_DEAL_SETTINGS: 'sh_hot_deal_settings',
   IS_ADMIN_UNLOCKED: 'sh_admin_unlocked',
 };
 
 // Default settings
 const DEFAULT_SETTINGS = {
-  defaultState: '',
+  defaultState: 'WA',
   counties: [],
   profitMarginTarget: 50,
   creditAlertThreshold: 100,
@@ -76,71 +77,149 @@ export const updateSettings = (updates) => {
 export const getHotDealSettings = () => getItem(STORAGE_KEYS.HOT_DEAL_SETTINGS, DEFAULT_HOT_DEAL_SETTINGS);
 export const setHotDealSettings = (settings) => setItem(STORAGE_KEYS.HOT_DEAL_SETTINGS, { ...DEFAULT_HOT_DEAL_SETTINGS, ...settings });
 
-// Units functions
-export const getUnits = () => getItem(STORAGE_KEYS.UNITS, []);
-export const setUnits = (units) => setItem(STORAGE_KEYS.UNITS, units);
-export const addUnit = (unit) => {
-  const units = getUnits();
-  const newUnit = { ...unit, id: Date.now().toString(), createdAt: new Date().toISOString() };
-  units.push(newUnit);
-  setUnits(units);
-  return newUnit;
-};
+// ============ API FUNCTIONS ============
 
-// My Bids functions
-export const getMyBids = () => getItem(STORAGE_KEYS.MY_BIDS, []);
-export const setMyBids = (bids) => setItem(STORAGE_KEYS.MY_BIDS, bids);
-export const addToMyBids = (unit) => {
-  const bids = getMyBids();
-  if (!bids.find(b => b.id === unit.id)) {
-    bids.push({ ...unit, addedAt: new Date().toISOString() });
-    setMyBids(bids);
+// Scan auctions with AI agents
+export const scanAuctions = async (urls, stateFilter = null, countyFilter = null) => {
+  try {
+    const response = await fetch(`${API}/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        urls: urls,
+        state_filter: stateFilter,
+        county_filter: countyFilter
+      })
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Scan error:', error);
+    throw error;
   }
-  return bids;
-};
-export const removeFromMyBids = (unitId) => {
-  const bids = getMyBids().filter(b => b.id !== unitId);
-  setMyBids(bids);
-  return bids;
 };
 
-// Publish Queue functions
-export const getPublishQueue = () => getItem(STORAGE_KEYS.PUBLISH_QUEUE, []);
-export const setPublishQueue = (queue) => setItem(STORAGE_KEYS.PUBLISH_QUEUE, queue);
-export const addToPublishQueue = (unit) => {
-  const queue = getPublishQueue();
-  if (!queue.find(u => u.id === unit.id)) {
-    queue.push({ ...unit, queuedAt: new Date().toISOString() });
-    setPublishQueue(queue);
+// Get review queue (Admin)
+export const getReviewQueue = async (state = null, county = null) => {
+  try {
+    let url = `${API}/review-queue`;
+    const params = new URLSearchParams();
+    if (state) params.append('state', state);
+    if (county) params.append('county', county);
+    if (params.toString()) url += `?${params.toString()}`;
+    
+    const response = await fetch(url);
+    return await response.json();
+  } catch (error) {
+    console.error('Get review queue error:', error);
+    throw error;
   }
-  return queue;
-};
-export const removeFromPublishQueue = (unitId) => {
-  const queue = getPublishQueue().filter(u => u.id !== unitId);
-  setPublishQueue(queue);
-  return queue;
 };
 
-// Check if unit qualifies as hot deal
+// Review queue action (approve/reject)
+export const reviewQueueAction = async (unitId, action, notes = null) => {
+  try {
+    const response = await fetch(`${API}/review-queue/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unit_id: unitId,
+        action: action,
+        notes: notes
+      })
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Review action error:', error);
+    throw error;
+  }
+};
+
+// Get published units
+export const getPublishedUnits = async (state = null, county = null) => {
+  try {
+    let url = `${API}/published-units`;
+    const params = new URLSearchParams();
+    if (state) params.append('state', state);
+    if (county) params.append('county', county);
+    if (params.toString()) url += `?${params.toString()}`;
+    
+    const response = await fetch(url);
+    return await response.json();
+  } catch (error) {
+    console.error('Get published units error:', error);
+    throw error;
+  }
+};
+
+// Get my bids from API
+export const getMyBidsAPI = async () => {
+  try {
+    const response = await fetch(`${API}/my-bids`);
+    return await response.json();
+  } catch (error) {
+    console.error('Get my bids error:', error);
+    throw error;
+  }
+};
+
+// Add to my bids via API
+export const addToMyBidsAPI = async (unitId) => {
+  try {
+    const response = await fetch(`${API}/my-bids/add?unit_id=${unitId}`, {
+      method: 'POST'
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Add to my bids error:', error);
+    throw error;
+  }
+};
+
+// Remove from my bids via API
+export const removeFromMyBidsAPI = async (unitId) => {
+  try {
+    const response = await fetch(`${API}/my-bids/${unitId}`, {
+      method: 'DELETE'
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Remove from my bids error:', error);
+    throw error;
+  }
+};
+
+// Get dashboard stats
+export const getStats = async () => {
+  try {
+    const response = await fetch(`${API}/stats`);
+    return await response.json();
+  } catch (error) {
+    console.error('Get stats error:', error);
+    throw error;
+  }
+};
+
+// Check if unit is a hot deal based on settings
 export const isHotDeal = (unit) => {
   const settings = getHotDealSettings();
   if (!settings.enabled) return false;
   
-  const profitPercent = unit.estimatedValue > 0 
-    ? ((unit.estimatedValue - unit.startingBid) / unit.startingBid) * 100 
-    : 0;
+  const optimizer = unit?.optimizer_analysis;
+  if (!optimizer || !optimizer.final_recommendation) return false;
+  
+  const hunter = unit?.hunter_analysis;
+  const estimatedValue = hunter?.estimated_value?.mid || 0;
+  const currentBid = hunter?.current_bid || 0;
+  
+  const profitRange = optimizer.final_recommendation.expected_profit || {};
+  const expectedProfit = profitRange.mid || 0;
+  const profitPercent = currentBid > 0 ? (expectedProfit / currentBid) * 100 : 0;
   
   return (
     profitPercent >= settings.minProfitPercent &&
-    unit.estimatedValue >= settings.minEstimatedValue &&
-    unit.startingBid <= settings.maxStartingBid
+    estimatedValue >= settings.minEstimatedValue &&
+    currentBid <= settings.maxStartingBid
   );
-};
-
-// Get hot deals from units
-export const getHotDeals = () => {
-  const units = getUnits();
-  return units.filter(isHotDeal);
 };
 
 export { STORAGE_KEYS, DEFAULT_SETTINGS, DEFAULT_HOT_DEAL_SETTINGS };

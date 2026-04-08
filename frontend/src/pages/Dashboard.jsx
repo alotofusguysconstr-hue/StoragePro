@@ -1,36 +1,41 @@
-import { useEffect, useState } from 'react';
-import { TrendingUp, Gavel, Package, DollarSign, RefreshCw } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { TrendingUp, Gavel, Package, DollarSign, RefreshCw, Zap, Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
+import { Badge } from '../components/ui/badge';
 import { HotDealsCard } from '../components/HotDealsCard';
-import { getUnits, getMyBids, getPublishQueue, getSettings } from '../lib/storage';
+import { UnitCard } from '../components/UnitCard';
+import { getSettings, getStats, getPublishedUnits } from '../lib/storage';
 
 export const Dashboard = () => {
-  const [stats, setStats] = useState({
-    totalUnits: 0,
-    myBids: 0,
-    pendingPublish: 0,
-    potentialProfit: 0,
+  const [stats, setStatsState] = useState({
+    total_units: 0,
+    my_bids: 0,
+    pending_review: 0,
+    potential_profit: 0,
+    scanned_today: 0,
   });
+  const [publishedUnits, setPublishedUnits] = useState([]);
   const [settings, setSettingsState] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const loadData = () => {
-    const units = getUnits();
-    const bids = getMyBids();
-    const queue = getPublishQueue();
-    const settingsData = getSettings();
-
-    const potentialProfit = bids.reduce((sum, unit) => {
-      return sum + (unit.estimatedValue - unit.startingBid);
-    }, 0);
-
-    setStats({
-      totalUnits: units.length,
-      myBids: bids.length,
-      pendingPublish: queue.length,
-      potentialProfit,
-    });
-    setSettingsState(settingsData);
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [statsData, publishedData, settingsData] = await Promise.all([
+        getStats(),
+        getPublishedUnits(),
+        Promise.resolve(getSettings())
+      ]);
+      
+      setStatsState(statsData);
+      setPublishedUnits(publishedData.units || []);
+      setSettingsState(settingsData);
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -48,28 +53,28 @@ export const Dashboard = () => {
   const statCards = [
     {
       title: 'Total Units',
-      value: stats.totalUnits,
+      value: stats.total_units,
       icon: Package,
       color: 'text-blue-400',
       bgColor: 'bg-blue-500/10',
     },
     {
       title: 'My Bids',
-      value: stats.myBids,
+      value: stats.my_bids,
       icon: Gavel,
       color: 'text-emerald-400',
       bgColor: 'bg-emerald-500/10',
     },
     {
-      title: 'Pending Publish',
-      value: stats.pendingPublish,
-      icon: RefreshCw,
+      title: 'Scanned Today',
+      value: stats.scanned_today,
+      icon: Zap,
       color: 'text-amber-400',
       bgColor: 'bg-amber-500/10',
     },
     {
       title: 'Potential Profit',
-      value: formatCurrency(stats.potentialProfit),
+      value: formatCurrency(stats.potential_profit),
       icon: DollarSign,
       color: 'text-emerald-400',
       bgColor: 'bg-emerald-500/10',
@@ -92,11 +97,12 @@ export const Dashboard = () => {
         </div>
         <Button 
           onClick={loadData}
+          disabled={loading}
           variant="outline"
           className="bg-[#131B2F] border-[#1E293B] text-slate-200 hover:bg-[#1E293B] hover:text-slate-100"
           data-testid="refresh-dashboard"
         >
-          <RefreshCw size={16} className="mr-2" />
+          <RefreshCw size={16} className={`mr-2 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
       </div>
@@ -132,7 +138,36 @@ export const Dashboard = () => {
       </div>
 
       {/* Hot Deals Section */}
-      <HotDealsCard />
+      <HotDealsCard units={publishedUnits} />
+
+      {/* Recent Published Units */}
+      {publishedUnits.length > 0 && (
+        <Card className="bg-[#131B2F] border-[#1E293B]">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-lg font-semibold text-slate-100 font-['Outfit']">
+              Recent Opportunities
+            </CardTitle>
+            <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
+              {publishedUnits.length} units
+            </Badge>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {publishedUnits.slice(0, 3).map((unit) => (
+              <UnitCard key={unit.auction_id} unit={unit} compact />
+            ))}
+            {publishedUnits.length > 3 && (
+              <Button
+                variant="ghost"
+                className="w-full text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                onClick={() => window.location.href = '/my-bids'}
+                data-testid="view-all-units"
+              >
+                View all {publishedUnits.length} units
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Quick Actions */}
       <Card className="bg-[#131B2F] border-[#1E293B]">
@@ -147,8 +182,8 @@ export const Dashboard = () => {
             onClick={() => window.location.href = '/scan'}
             data-testid="quick-scan"
           >
-            <Package size={18} className="mr-2" />
-            Find New Units
+            <Zap size={18} className="mr-2" />
+            Start New Scan
           </Button>
           <Button
             variant="outline"

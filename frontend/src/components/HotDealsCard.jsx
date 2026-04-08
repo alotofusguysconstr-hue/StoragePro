@@ -2,12 +2,14 @@ import { Flame, TrendingUp, DollarSign, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { getHotDeals, getHotDealSettings } from '../lib/storage';
+import { getHotDealSettings, isHotDeal } from '../lib/storage';
 
-export const HotDealsCard = () => {
+export const HotDealsCard = ({ units = [] }) => {
   const navigate = useNavigate();
-  const hotDeals = getHotDeals();
   const settings = getHotDealSettings();
+  
+  // Filter units that qualify as hot deals
+  const hotDeals = units.filter(unit => isHotDeal(unit));
 
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('en-US', {
@@ -17,13 +19,25 @@ export const HotDealsCard = () => {
     }).format(value);
   };
 
-  const calculateProfit = (unit) => {
-    return unit.estimatedValue - unit.startingBid;
+  const getExpectedProfit = (unit) => {
+    const optimizer = unit?.optimizer_analysis;
+    if (!optimizer?.final_recommendation?.expected_profit) return 0;
+    return optimizer.final_recommendation.expected_profit.mid || 0;
   };
 
-  const calculateProfitPercent = (unit) => {
-    if (unit.startingBid === 0) return 0;
-    return Math.round(((unit.estimatedValue - unit.startingBid) / unit.startingBid) * 100);
+  const getMaxBid = (unit) => {
+    const optimizer = unit?.optimizer_analysis;
+    if (!optimizer?.final_recommendation) return 0;
+    return optimizer.final_recommendation.max_bid || 0;
+  };
+
+  const getProfitPercent = (unit) => {
+    const hunter = unit?.hunter_analysis;
+    const optimizer = unit?.optimizer_analysis;
+    const currentBid = hunter?.current_bid || 0;
+    const profit = getExpectedProfit(unit);
+    if (currentBid === 0) return 0;
+    return Math.round((profit / currentBid) * 100);
   };
 
   if (!settings.enabled) {
@@ -66,42 +80,42 @@ export const HotDealsCard = () => {
           <div className="text-center py-8">
             <p className="text-slate-400 text-sm">No extraordinary deals found yet.</p>
             <p className="text-slate-500 text-xs mt-1">
-              Configure thresholds in Admin settings
+              Scan auction URLs to find hot deals
             </p>
           </div>
         ) : (
           <>
             {hotDeals.slice(0, 3).map((unit, index) => (
               <div 
-                key={unit.id}
+                key={unit.auction_id}
                 className="flex items-center justify-between p-3 rounded-lg bg-[#0B1121]/50 border border-[#1E293B] hover:border-emerald-500/30 transition-all duration-200 animate-fade-in-up"
                 style={{ animationDelay: `${index * 100}ms` }}
-                data-testid={`hot-deal-${unit.id}`}
+                data-testid={`hot-deal-${unit.auction_id}`}
               >
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-200 truncate">
-                    {unit.facilityName}
+                    {unit.hunter_analysis?.facility_name || 'Storage Unit'}
                   </p>
                   <p className="text-xs text-slate-500">
-                    {unit.unitSize} • {unit.county}, {unit.state}
+                    {unit.hunter_analysis?.unit_size || 'N/A'} • {unit.county || unit.hunter_analysis?.county}, {unit.state || unit.hunter_analysis?.state}
                   </p>
                 </div>
                 <div className="flex items-center gap-4 ml-4">
                   <div className="text-right">
                     <div className="flex items-center gap-1 text-emerald-400">
                       <TrendingUp size={14} />
-                      <span className="text-sm font-bold">+{calculateProfitPercent(unit)}%</span>
+                      <span className="text-sm font-bold">+{getProfitPercent(unit)}%</span>
                     </div>
                     <p className="text-xs text-slate-400">
-                      {formatCurrency(calculateProfit(unit))} profit
+                      {formatCurrency(getExpectedProfit(unit))} profit
                     </p>
                   </div>
                   <div className="text-right">
                     <div className="flex items-center gap-1 text-slate-200">
                       <DollarSign size={14} />
-                      <span className="text-sm font-semibold">{unit.startingBid}</span>
+                      <span className="text-sm font-semibold">{getMaxBid(unit)}</span>
                     </div>
-                    <p className="text-xs text-slate-500">start</p>
+                    <p className="text-xs text-slate-500">max bid</p>
                   </div>
                 </div>
               </div>
