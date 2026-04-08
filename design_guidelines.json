@@ -1,0 +1,72 @@
+{
+  "theme": "dark",
+  "archetype": "Archetype 5 (Jewel & Luxury) - Technical Profit Variant",
+  "domain": "Finance / Deal Hunting / Dashboard",
+  "colors": {
+    "background": "bg-[#0B1121] (Deep Midnight Blue)",
+    "surface": "bg-[#131B2F] (Slightly lighter blue for cards)",
+    "primary": "bg-emerald-500 hover:bg-emerald-400 text-slate-950 (Profit Green)",
+    "secondary": "bg-blue-600 hover:bg-blue-500 text-white",
+    "accent": "text-emerald-400",
+    "muted": "text-slate-400",
+    "border": "border-[#1E293B]",
+    "success": "text-emerald-500",
+    "danger": "text-rose-500"
+  },
+  "typography": {
+    "heading_font": "Outfit",
+    "body_font": "Manrope",
+    "hierarchy": {
+      "h1": "text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight",
+      "h2": "text-2xl sm:text-3xl font-semibold tracking-tight",
+      "h3": "text-xl sm:text-2xl font-medium",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm text-slate-400 uppercase tracking-widest"
+    }
+  },
+  "spacing_and_layout": {
+    "container": "p-4 sm:p-6 lg:p-8",
+    "cards": "p-6 rounded-xl border border-[#1E293B] bg-[#131B2F]",
+    "bottom_nav": "fixed bottom-0 left-0 right-0 h-20 bg-[#0B1121]/90 backdrop-blur-xl border-t border-[#1E293B] flex justify-around items-center z-50 md:hidden pb-safe",
+    "desktop_sidebar": "hidden md:flex flex-col w-64 h-screen border-r border-[#1E293B] bg-[#0B1121] fixed left-0 top-0 p-6",
+    "main_content": "pb-24 md:pb-8 md:pl-64 pt-6 md:pt-8 min-h-screen bg-[#0B1121] text-slate-200"
+  },
+  "components_strategy": {
+    "cards": "Use flat backgrounds with 1px solid border. Avoid drop shadows in dark mode, use subtle border highlights instead.",
+    "buttons": "Primary CTA must be emerald green for profit actions. Secondary buttons use muted slate or blue.",
+    "inputs": "Shadcn UI styled. Dark backgrounds, high contrast text, emerald green focus rings.",
+    "extraordinary_deals": "Glassmorphic window: border border-emerald-500/30 bg-emerald-500/10 backdrop-blur-md relative overflow-hidden. Add an absolute pseudo-element with a blur for a glowing effect.",
+    "badges": "Pill shapes (rounded-full). Hot Deal: bg-emerald-500/20 text-emerald-400 border border-emerald-500/30."
+  },
+  "icons_and_assets": {
+    "icon_library": "lucide-react",
+    "image_urls": {
+      "login_background": {
+        "url": "https://images.unsplash.com/photo-1759647028384-1efcc6e0eff4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODd8MHwxfHNlYXJjaHwyfHxzdG9yYWdlJTIwdW5pdCUyMHdhcmVob3VzZXxlbnwwfHx8fDE3NzU2MTU4NjZ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Storage unit background, overlay with bg-[#0B1121]/80 for login screen or hero banner."
+      },
+      "feature_background": {
+        "url": "https://images.unsplash.com/photo-1770720086655-22f3d1205dc2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODd8MHwxfHNlYXJjaHwxfHxzdG9yYWdlJTIwdW5pdCUyMHdhcmVob3VzZXxlbnwwfHx8fDE3NzU2MTU4NjZ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Alternative storage background for generic empty states."
+      }
+    }
+  },
+  "motion_and_interactions": {
+    "hover": "Hovered cards should lift slightly (-translate-y-1) and increase border opacity.",
+    "active": "Buttons scale-95 on active.",
+    "page_transition": "Use framer-motion for tab switching (opacity 0->1, y 10->0)."
+  },
+  "instructions_to_main_agent": [
+    "Initialize with React, Tailwind CSS, and Shadcn UI.",
+    "Install Google Fonts 'Outfit' and 'Manrope' in index.html or via @import in CSS.",
+    "Build a mobile-first responsive layout with Bottom Navigation for mobile and Sidebar for desktop.",
+    "Tabs/Pages required: Home (Dashboard), Scan, My Bids, Admin.",
+    "Implement 'Extraordinary Deals' window on the Dashboard that visualizes hot units with the glowing emerald design.",
+    "Admin access must be protected by a simple PIN code screen (mock validation via local storage, e.g., '1234').",
+    "Admin Dashboard needs: Form inputs for Default State, an empty customizable County List (allow adding/removing strings), Profit Margin Targets, and a Credit Alerts toggle.",
+    "Location Filter: A section searchable by State + County.",
+    "Publish Queue: Render a list of analyzed units where admin can click 'Publish' or 'Add to My Bids'.",
+    "Use LocalStorage to mock and save user settings and the state of the app (e.g., extraordinary deals threshold settings).",
+    "All interactive and key informational elements MUST include a data-testid attribute to facilitate robust automated testing."
+  ]
+}
