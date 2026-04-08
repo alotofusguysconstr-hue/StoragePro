@@ -1,34 +1,120 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* StorageHunter Pro - Main App Styles */
+
+.app-container {
+  min-height: 100vh;
+  background-color: #0B1121;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+/* Main content area */
+.main-content {
+  padding-bottom: 6rem;
+  min-height: 100vh;
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
+@media (min-width: 768px) {
+  .main-content {
+    padding-left: 16rem;
+    padding-bottom: 2rem;
+  }
+}
+
+/* Card hover effects */
+.card-hover {
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+/* Button active state */
+.btn-active:active {
+  transform: scale(0.95);
+}
+
+/* Glassmorphic effect */
+.glass {
+  background: rgba(16, 185, 129, 0.1);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Stat card styles */
+.stat-card {
+  background: #131B2F;
+  border: 1px solid #1E293B;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  transition: all 0.2s ease;
+}
+
+.stat-card:hover {
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+/* Bottom nav styling */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 5rem;
+  background: rgba(11, 17, 33, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid #1E293B;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 50;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (min-width: 768px) {
+  .bottom-nav {
+    display: none;
+  }
+}
+
+/* Sidebar styling */
+.sidebar {
+  display: none;
+  flex-direction: column;
+  width: 16rem;
+  height: 100vh;
+  border-right: 1px solid #1E293B;
+  background: #0B1121;
+  position: fixed;
+  left: 0;
+  top: 0;
+  padding: 1.5rem;
+}
+
+@media (min-width: 768px) {
+  .sidebar {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+  }
 }
 
-.App-link {
-    color: #61dafb;
+/* Hot deal badge pulse */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.6);
+  }
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Form input focus */
+.input-focus:focus {
+  outline: none;
+  ring: 2px;
+  ring-color: #10B981;
+  border-color: #10B981;
 }
