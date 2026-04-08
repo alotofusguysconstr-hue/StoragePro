@@ -13,7 +13,6 @@ import { US_STATES } from '../lib/constants';
 import { getSettings, scanAuctions } from '../lib/storage';
 import { toast } from 'sonner';
 
-// Sample auction URLs for demo
 const SAMPLE_URLS = [
   'https://www.storagetreasures.com/auctions/detail/1234567',
   'https://www.hibid.com/lot/12345678',
@@ -22,7 +21,8 @@ const SAMPLE_URLS = [
 
 export const Scan = () => {
   const settings = getSettings();
-  const [selectedState, setSelectedState] = useState(settings.defaultState || '');
+
+  const [selectedState, setSelectedState] = useState(settings.defaultState || 'any');
   const [selectedCounty, setSelectedCounty] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [isScanning, setIsScanning] = useState(false);
@@ -30,8 +30,11 @@ export const Scan = () => {
   const [error, setError] = useState(null);
 
   const handleScan = async () => {
-    const urls = urlInput.split('\n').map(u => u.trim()).filter(u => u.length > 0);
-    
+    const urls = urlInput
+      .split('\n')
+      .map(u => u.trim())
+      .filter(u => u.length > 0);
+
     if (urls.length === 0) {
       toast.error('Please enter at least one auction URL');
       return;
@@ -43,26 +46,37 @@ export const Scan = () => {
 
     try {
       const effectiveState = selectedState === 'any' ? '' : selectedState;
-      const response = await scanAuctions(urls, effectiveState, selectedCounty);
-      setResults(response);
-      
-      if (response.analyzed > 0) {
-        toast.success(`Analyzed ${response.analyzed} unit(s) successfully!`);
+
+      // Call the fixed scanAuctions (from the previous file we updated)
+      const data = await scanAuctions(urls, effectiveState, selectedCounty);
+
+      setResults(data);
+
+      // Safe property access
+      if (data?.analyzed && data.analyzed > 0) {
+        toast.success(`Analyzed ${data.analyzed} unit(s) successfully!`);
       }
-      if (response.duplicates > 0) {
-        toast.warning(`${response.duplicates} duplicate(s) skipped`);
+
+      if (data?.duplicates && data.duplicates > 0) {
+        toast.warning(`${data.duplicates} duplicate(s) skipped`);
       }
+
+      if (data?.analyzed === 0) {
+        toast.info("Scan completed, but no new units were found.");
+      }
+
     } catch (err) {
-      setError(err.message || 'Failed to scan auctions');
-      toast.error('Scan failed. Please try again.');
+      const errorMsg = err.message || 'Failed to scan auctions';
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setIsScanning(false);
     }
   };
 
-  const handleScanPopular = async () => {
+  const handleScanPopular = () => {
     setUrlInput(SAMPLE_URLS.join('\n'));
-    toast.info('Sample URLs loaded. Click "Analyze" to scan.');
+    toast.info('Sample URLs loaded. Click "Analyze with StorageBid Hunter" to scan.');
   };
 
   return (
@@ -129,20 +143,13 @@ export const Scan = () => {
             <div className="space-y-2">
               <Label className="text-slate-300">State</Label>
               <Select value={selectedState} onValueChange={setSelectedState}>
-                <SelectTrigger 
-                  className="bg-[#0B1121] border-[#1E293B] text-slate-200"
-                  data-testid="state-select"
-                >
+                <SelectTrigger className="bg-[#0B1121] border-[#1E293B] text-slate-200">
                   <SelectValue placeholder="Any state" />
                 </SelectTrigger>
                 <SelectContent className="bg-[#131B2F] border-[#1E293B]">
-                  <SelectItem value="any" className="text-slate-200">Any state</SelectItem>
+                  <SelectItem value="any">Any state</SelectItem>
                   {US_STATES.map((state) => (
-                    <SelectItem 
-                      key={state.value} 
-                      value={state.value}
-                      className="text-slate-200 focus:bg-emerald-500/20 focus:text-emerald-400"
-                    >
+                    <SelectItem key={state.value} value={state.value}>
                       {state.label}
                     </SelectItem>
                   ))}
@@ -205,7 +212,7 @@ export const Scan = () => {
                 </div>
                 <div className="flex gap-4 text-sm">
                   <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
-                    {results.analyzed} Analyzed
+                    {results.analyzed || 0} Analyzed
                   </Badge>
                   {results.duplicates > 0 && (
                     <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">
@@ -242,7 +249,7 @@ export const Scan = () => {
                 Units are now in Admin Review Queue for approval before publishing.
               </p>
               {results.results.map((unit) => (
-                <UnitCard key={unit.auction_id} unit={unit} showFullAnalysis />
+                <UnitCard key={unit.auction_id || unit.id} unit={unit} showFullAnalysis />
               ))}
             </div>
           )}
@@ -256,11 +263,9 @@ export const Scan = () => {
             <div className="w-16 h-16 rounded-full bg-[#1E293B] flex items-center justify-center mx-auto mb-4">
               <Search size={32} className="text-slate-500" />
             </div>
-            <h3 className="text-lg font-semibold text-slate-300 font-['Outfit']">
-              Ready to Hunt
-            </h3>
+            <h3 className="text-lg font-semibold text-slate-300 font-['Outfit']">Ready to Hunt</h3>
             <p className="text-slate-500 text-sm mt-2 max-w-md mx-auto">
-              Paste auction URLs above and click "Analyze" to run the AI agents.
+              Paste auction URLs above and click "Analyze" to run the AI agents. 
               StorageBid Hunter will scan first, then StorageProfit Optimizer will analyze promising units.
             </p>
           </CardContent>
