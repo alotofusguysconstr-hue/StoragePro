@@ -1,7 +1,7 @@
 // LocalStorage utility functions for StorageHunter Pro
 // Now also includes API integration
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || window.location.origin;
 const API = `${BACKEND_URL}/api`;
 
 const STORAGE_KEYS = {
