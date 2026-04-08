@@ -1,8 +1,6 @@
 // netlify/functions/scan.js
-// Returns fake storage auction data so you can test the full UI
-
 exports.handler = async (event) => {
-  // CORS headers
+  // Allow CORS for preview environments
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
@@ -10,7 +8,7 @@ exports.handler = async (event) => {
     'Content-Type': 'application/json'
   };
 
-  // Handle preflight
+  // Handle preflight OPTIONS request
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers };
   }
@@ -25,7 +23,7 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || '{}');
-    const { urls = [], state_filter = 'WA', county_filter = 'King' } = body;
+    const { urls = [], state_filter = '', county_filter = '' } = body;
 
     if (!urls || urls.length === 0) {
       return {
@@ -35,65 +33,19 @@ exports.handler = async (event) => {
       };
     }
 
-    // Fake analyzed units (King County style)
-    const fakeResults = [
-      {
-        auction_id: "ST-78492",
-        title: "5x10 Climate Controlled Unit",
-        location: "Redmond, WA",
-        starting_bid: 45,
-        current_bid: 125,
-        estimated_value: { mid: 850 },
-        end_time: "2026-04-15T18:00:00Z",
-        auction_site: "StorageTreasures",
-        url: urls[0] || "https://www.storagetreasures.com/auctions/detail/78492",
-        hunter_analysis: {
-          current_bid: 125,
-          estimated_value: { mid: 850 }
-        },
-        optimizer_analysis: {
-          final_recommendation: {
-            expected_profit: { mid: 620 }
-          }
-        }
-      },
-      {
-        auction_id: "HB-23914",
-        title: "10x15 Unit - Tools & Furniture",
-        location: "Bellevue, WA",
-        starting_bid: 85,
-        current_bid: 210,
-        estimated_value: { mid: 1450 },
-        end_time: "2026-04-16T14:30:00Z",
-        auction_site: "HiBid",
-        url: urls[1] || "https://www.hibid.com/lot/23914",
-        hunter_analysis: {
-          current_bid: 210,
-          estimated_value: { mid: 1450 }
-        },
-        optimizer_analysis: {
-          final_recommendation: {
-            expected_profit: { mid: 980 }
-          }
-        }
-      }
-    ];
-
+    // Placeholder response - this proves the function is working
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         analyzed: urls.length,
-        duplicates: Math.floor(urls.length * 0.3), // simulate some duplicates
-        results: fakeResults,
-        duplicate_warnings: urls.length > 2 ? [
-          { message: "Duplicate auction detected from same seller" }
-        ] : [],
-        message: `✅ Successfully analyzed ${urls.length} URLs (using fake data for testing)`,
+        duplicates: 0,
+        results: [],
+        duplicate_warnings: [],
+        message: "✅ Scan function is now working (placeholder)",
         analyzed_urls: urls,
         state_filter,
-        county_filter,
-        note: "This is placeholder data. Real scraping + AI will be added next."
+        county_filter
       })
     };
   } catch (error) {
