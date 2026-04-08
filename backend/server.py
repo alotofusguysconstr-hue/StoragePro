@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Request, BackgroundTasks
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,14 +6,36 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import hashlib
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+import base64
+import httpx
+from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 
+# Load environment variables
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+# Import local modules
+from scraper import scrape_auction_url
+from notifications import (
+    get_vapid_public_key, 
+    send_hot_deal_notification, 
+    send_scan_complete_notification,
+    broadcast_notification
+)
+from subscriptions import (
+    SubscriptionTier, 
+    paypal_service, 
+    get_tier_config, 
+    get_all_tiers,
+    check_scan_limit,
+    can_use_vision,
+    can_use_notifications,
+    TIER_CONFIG
+)
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
@@ -24,7 +46,7 @@ db = client[os.environ['DB_NAME']]
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
 # Create the main app without a prefix
-app = FastAPI()
+app = FastAPI(title="StorageHunter Pro API")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -98,6 +120,41 @@ Your job is to analyze auction listings from sites like StorageTreasures, HiBid,
 ```
 
 Be realistic and conservative. Your job is to filter out bad units before they waste time with deeper analysis."""
+
+STORAGE_BID_HUNTER_VISION_PROMPT = """You are StorageBid Hunter with Vision capabilities. You can see and analyze actual photos of storage units.
+
+Analyze the provided storage unit images carefully. Look for:
+- All visible items (furniture, electronics, boxes, tools, appliances)
+- Signs of value (brand names, quality materials, organized contents)
+- Red flags (water damage, mold, pests, garbage, broken items)
+- Overall unit organization and accessibility
+
+Based on what you SEE in the images, provide your analysis in JSON format:
+```json
+{
+  "visible_items": ["list of specific items you can identify"],
+  "item_categories": {
+    "electronics": ["specific items"],
+    "furniture": ["specific items"],
+    "tools": ["specific items"],
+    "boxes": "count and condition",
+    "appliances": ["specific items"],
+    "other": ["specific items"]
+  },
+  "quality_assessment": "poor/fair/good/excellent based on visible condition",
+  "red_flags": ["any concerns you see"],
+  "predictability_score": 1-10,
+  "estimated_value": {
+    "low": dollar_amount,
+    "mid": dollar_amount,
+    "high": dollar_amount
+  },
+  "initial_recommendation": "PROMISING/MAYBE/PASS",
+  "vision_notes": "What you observed from the actual photos"
+}
+```
+
+Be specific about what you actually see. Don't guess - if something is unclear, note it as uncertain."""
 
 STORAGE_PROFIT_OPTIMIZER_PROMPT = """You are StorageProfit Optimizer, an expert complementary AI agent that works in tandem with StorageBid Hunter.
 
@@ -185,44 +242,35 @@ When you receive unit data from StorageBid Hunter, you MUST analyze each unit us
 - Always assume you will only recover 40-60% of retail value on average (storage auction reality).
 - Factor in the user's likely location (currently Redmond, Washington area) for transportation and local market values.
 - Be brutally honest — if a unit looks good in photos but has low profit margin after costs, say "Pass" clearly.
-- Use real-world storage auction knowledge: people often store expensive unused gym equipment, tools, seasonal items, and furniture they couldn't sell.
 
 You are the profit gatekeeper. Your goal is to protect the user from bad buys and maximize ROI on good ones."""
 
 
 # ============ PYDANTIC MODELS ============
 
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-class StatusCheckCreate(BaseModel):
-    client_name: str
-
 class ScanRequest(BaseModel):
     urls: List[str]
     state_filter: Optional[str] = None
     county_filter: Optional[str] = None
+    use_vision: Optional[bool] = True
 
 class UnitApproval(BaseModel):
     unit_id: str
     action: str  # "approve", "reject", "edit"
     notes: Optional[str] = None
 
-class SettingsUpdate(BaseModel):
-    default_state: Optional[str] = None
-    counties: Optional[List[str]] = None
-    profit_margin_target: Optional[int] = None
-    credit_alert_threshold: Optional[int] = None
-    credit_alerts_enabled: Optional[bool] = None
+class PushSubscription(BaseModel):
+    endpoint: str
+    keys: Dict[str, str]
 
-class HotDealSettingsUpdate(BaseModel):
-    enabled: Optional[bool] = None
-    min_profit_percent: Optional[int] = None
-    min_estimated_value: Optional[int] = None
-    max_starting_bid: Optional[int] = None
+class SubscriptionRequest(BaseModel):
+    tier: str
+    return_url: str
+    cancel_url: str
+
+class UserCreate(BaseModel):
+    email: str
+    name: Optional[str] = None
 
 
 # ============ HELPER FUNCTIONS ============
@@ -239,34 +287,98 @@ async def check_duplicate(auction_id: str) -> Optional[dict]:
     )
     return existing
 
-async def run_storage_bid_hunter(url: str) -> dict:
+async def get_user_tier(user_id: str) -> SubscriptionTier:
+    """Get user's subscription tier"""
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0, "tier": 1})
+    if user and user.get("tier"):
+        return SubscriptionTier(user["tier"])
+    return SubscriptionTier.FREE
+
+async def get_user_scans_today(user_id: str) -> int:
+    """Get number of scans user has done today"""
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    count = await db.scan_logs.count_documents({
+        "user_id": user_id,
+        "timestamp": {"$gte": today_start.isoformat()}
+    })
+    return count
+
+async def log_scan(user_id: str, urls_count: int):
+    """Log a scan for rate limiting"""
+    await db.scan_logs.insert_one({
+        "user_id": user_id,
+        "urls_count": urls_count,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+
+async def fetch_image_as_base64(url: str) -> Optional[str]:
+    """Fetch an image from URL and convert to base64"""
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url)
+            if response.status_code == 200:
+                content_type = response.headers.get('content-type', 'image/jpeg')
+                if 'image' in content_type:
+                    return base64.b64encode(response.content).decode('utf-8')
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching image: {e}")
+        return None
+
+async def run_storage_bid_hunter(url: str, scraped_data: Dict, use_vision: bool = False) -> dict:
     """Run StorageBid Hunter agent on a single URL"""
     try:
+        # Choose prompt based on vision capability
+        system_prompt = STORAGE_BID_HUNTER_VISION_PROMPT if use_vision else STORAGE_BID_HUNTER_PROMPT
+        
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"hunter-{uuid.uuid4()}",
-            system_message=STORAGE_BID_HUNTER_PROMPT
+            system_message=system_prompt
         ).with_model("gemini", "gemini-3-flash-preview")
         
-        user_message = UserMessage(
-            text=f"""Analyze this storage auction listing URL and provide your assessment in the JSON format specified.
+        # Build context from scraped data
+        context = f"""Analyze this storage auction listing:
 
 Auction URL: {url}
-
-Note: Since I cannot actually visit the URL, please simulate a realistic analysis based on typical storage auction listings. Generate plausible data that would be found on such a listing, including:
-- A realistic facility name and location (prefer Washington state)
-- Typical unit contents and conditions
-- Realistic pricing and auction timing
-- Appropriate value estimates
-
-Respond ONLY with valid JSON, no markdown formatting."""
-        )
+Source: {scraped_data.get('source', 'Unknown')}
+Facility: {scraped_data.get('facility_name', 'Unknown')}
+Location: {scraped_data.get('address', 'Unknown')}
+State: {scraped_data.get('state', 'Unknown')}
+County: {scraped_data.get('county', 'Unknown')}
+Unit Size: {scraped_data.get('unit_size', 'Unknown')}
+Current Bid: ${scraped_data.get('current_bid', 0)}
+Auction End: {scraped_data.get('auction_end_date', 'Unknown')}
+"""
+        
+        # If vision enabled and images available, analyze them
+        if use_vision and scraped_data.get('images'):
+            images_analyzed = []
+            for img_url in scraped_data['images'][:3]:  # Limit to 3 images
+                img_base64 = await fetch_image_as_base64(img_url)
+                if img_base64:
+                    images_analyzed.append(img_base64)
+            
+            if images_analyzed:
+                # Use vision model with images
+                image_contents = [ImageContent(image_base64=img) for img in images_analyzed]
+                user_message = UserMessage(
+                    text=context + "\n\nAnalyze these storage unit photos and provide your assessment in JSON format.",
+                    file_contents=image_contents
+                )
+            else:
+                user_message = UserMessage(
+                    text=context + "\n\nNo images available. Analyze based on listing data and provide realistic estimates in JSON format."
+                )
+        else:
+            user_message = UserMessage(
+                text=context + "\n\nProvide your analysis in JSON format based on the listing data."
+            )
         
         response = await chat.send_message(user_message)
         
         # Parse JSON from response
         import json
-        # Clean up response - remove markdown code blocks if present
         clean_response = response.strip()
         if clean_response.startswith("```"):
             clean_response = clean_response.split("```")[1]
@@ -279,6 +391,14 @@ Respond ONLY with valid JSON, no markdown formatting."""
         result["auction_id"] = generate_auction_id(url)
         result["analyzed_at"] = datetime.now(timezone.utc).isoformat()
         result["agent"] = "StorageBid Hunter"
+        result["vision_used"] = use_vision and bool(scraped_data.get('images'))
+        
+        # Merge scraped data
+        result["facility_name"] = result.get("facility_name") or scraped_data.get("facility_name", "Storage Unit")
+        result["state"] = result.get("state") or scraped_data.get("state", "Unknown")
+        result["county"] = result.get("county") or scraped_data.get("county", "Unknown")
+        result["current_bid"] = scraped_data.get("current_bid") or result.get("current_bid", 0)
+        result["images"] = scraped_data.get("images", [])
         
         return result
     except Exception as e:
@@ -287,7 +407,10 @@ Respond ONLY with valid JSON, no markdown formatting."""
             "auction_id": generate_auction_id(url),
             "auction_url": url,
             "error": str(e),
-            "initial_recommendation": "ERROR"
+            "initial_recommendation": "ERROR",
+            "facility_name": scraped_data.get("facility_name", "Storage Unit"),
+            "state": scraped_data.get("state", "Unknown"),
+            "county": scraped_data.get("county", "Unknown"),
         }
 
 async def run_storage_profit_optimizer(hunter_result: dict) -> dict:
@@ -338,33 +461,163 @@ Respond ONLY with valid JSON, no markdown formatting."""
 
 @api_router.get("/")
 async def root():
-    return {"message": "StorageHunter Pro API"}
+    return {"message": "StorageHunter Pro API", "version": "2.0"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
+@api_router.get("/config")
+async def get_config():
+    """Get public configuration"""
+    return {
+        "vapid_public_key": get_vapid_public_key(),
+        "tiers": get_all_tiers()
+    }
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    return status_checks
+
+# ============ USER & SUBSCRIPTION ROUTES ============
+
+@api_router.post("/users/create")
+async def create_user(user: UserCreate):
+    """Create a new user with free tier"""
+    user_id = str(uuid.uuid4())
+    user_doc = {
+        "user_id": user_id,
+        "email": user.email,
+        "name": user.name,
+        "tier": SubscriptionTier.FREE.value,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "subscription": None
+    }
+    await db.users.insert_one({**user_doc, "_id": user_id})
+    return {"user_id": user_id, "tier": SubscriptionTier.FREE.value}
+
+@api_router.get("/users/{user_id}")
+async def get_user(user_id: str):
+    """Get user details"""
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Add usage stats
+    scans_today = await get_user_scans_today(user_id)
+    tier = SubscriptionTier(user.get("tier", "free"))
+    tier_config = get_tier_config(tier)
+    
+    return {
+        **user,
+        "scans_today": scans_today,
+        "scans_limit": tier_config["scans_per_day"],
+        "can_scan": check_scan_limit(tier, scans_today)
+    }
+
+@api_router.get("/subscription/tiers")
+async def get_subscription_tiers():
+    """Get all available subscription tiers"""
+    return {"tiers": get_all_tiers()}
+
+@api_router.post("/subscription/create-order")
+async def create_subscription_order(request: SubscriptionRequest, user_id: str = "default"):
+    """Create a PayPal order for subscription upgrade"""
+    try:
+        tier = SubscriptionTier(request.tier)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tier")
+    
+    if tier == SubscriptionTier.FREE:
+        return {"status": "success", "message": "Free tier activated", "tier": "free"}
+    
+    result = await paypal_service.create_subscription_order(
+        tier=tier,
+        user_id=user_id,
+        return_url=request.return_url,
+        cancel_url=request.cancel_url
+    )
+    
+    return result
+
+@api_router.post("/subscription/capture/{order_id}")
+async def capture_subscription(order_id: str, user_id: str = "default"):
+    """Capture PayPal order after approval"""
+    result = await paypal_service.capture_order(order_id)
+    
+    if result.get("status") == "COMPLETED":
+        # Extract tier from reference_id
+        purchase_unit = result.get("purchase_units", [{}])[0]
+        ref_id = purchase_unit.get("reference_id", "")
+        tier_value = ref_id.split("_")[-1] if "_" in ref_id else "pro"
+        
+        # Update user subscription
+        await db.users.update_one(
+            {"user_id": user_id},
+            {
+                "$set": {
+                    "tier": tier_value,
+                    "subscription": {
+                        "order_id": order_id,
+                        "status": "active",
+                        "activated_at": datetime.now(timezone.utc).isoformat(),
+                        "amount": purchase_unit.get("payments", {}).get("captures", [{}])[0].get("amount", {}).get("value")
+                    }
+                }
+            },
+            upsert=True
+        )
+        
+        return {"status": "success", "tier": tier_value}
+    
+    return {"status": "failed", "details": result}
+
+
+# ============ PUSH NOTIFICATION ROUTES ============
+
+@api_router.post("/notifications/subscribe")
+async def subscribe_to_notifications(subscription: PushSubscription, user_id: str = "default"):
+    """Subscribe to push notifications"""
+    sub_doc = {
+        "user_id": user_id,
+        "subscription": {
+            "endpoint": subscription.endpoint,
+            "keys": subscription.keys
+        },
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    # Upsert subscription
+    await db.push_subscriptions.update_one(
+        {"user_id": user_id},
+        {"$set": sub_doc},
+        upsert=True
+    )
+    
+    return {"status": "subscribed"}
+
+@api_router.delete("/notifications/unsubscribe")
+async def unsubscribe_from_notifications(user_id: str = "default"):
+    """Unsubscribe from push notifications"""
+    await db.push_subscriptions.delete_one({"user_id": user_id})
+    return {"status": "unsubscribed"}
 
 
 # ============ SCAN & ANALYSIS ROUTES ============
 
 @api_router.post("/scan")
-async def scan_auctions(request: ScanRequest):
+async def scan_auctions(request: ScanRequest, background_tasks: BackgroundTasks, user_id: str = "default"):
     """Scan auction URLs with both AI agents"""
+    # Check user tier and limits
+    tier = await get_user_tier(user_id)
+    scans_today = await get_user_scans_today(user_id)
+    
+    if not check_scan_limit(tier, scans_today):
+        tier_config = get_tier_config(tier)
+        raise HTTPException(
+            status_code=429, 
+            detail=f"Daily scan limit reached ({tier_config['scans_per_day']} scans). Upgrade to Pro for unlimited scans."
+        )
+    
+    # Check vision capability
+    use_vision = request.use_vision and can_use_vision(tier)
+    
     results = []
     duplicates = []
+    hot_deals = 0
     
     for url in request.urls:
         url = url.strip()
@@ -384,13 +637,20 @@ async def scan_auctions(request: ScanRequest):
             })
             continue
         
-        # Run StorageBid Hunter
-        hunter_result = await run_storage_bid_hunter(url)
+        # Scrape real auction data
+        scraped_data = await scrape_auction_url(url)
+        
+        # Run StorageBid Hunter (with vision if available)
+        hunter_result = await run_storage_bid_hunter(url, scraped_data, use_vision)
         
         # If promising, run StorageProfit Optimizer
         optimizer_result = None
         if hunter_result.get("initial_recommendation") in ["PROMISING", "MAYBE"]:
             optimizer_result = await run_storage_profit_optimizer(hunter_result)
+            
+            # Check if it's a hot deal
+            if optimizer_result.get("final_recommendation", {}).get("verdict") == "GO":
+                hot_deals += 1
         
         # Combine results
         combined_result = {
@@ -402,19 +662,35 @@ async def scan_auctions(request: ScanRequest):
             "state": hunter_result.get("state", request.state_filter or "Unknown"),
             "county": hunter_result.get("county", request.county_filter or "Unknown"),
             "analyzed_at": datetime.now(timezone.utc).isoformat(),
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "vision_used": use_vision
         }
         
         # Save to database
         await db.analyzed_units.insert_one({**combined_result, "_id": auction_id})
         
-        # Remove _id for response
         results.append(combined_result)
+    
+    # Log the scan
+    await log_scan(user_id, len(results))
+    
+    # Send push notification if user has notifications enabled
+    if can_use_notifications(tier) and results:
+        sub = await db.push_subscriptions.find_one({"user_id": user_id}, {"_id": 0})
+        if sub:
+            background_tasks.add_task(
+                send_scan_complete_notification,
+                sub["subscription"],
+                len(results),
+                hot_deals
+            )
     
     return {
         "success": True,
         "analyzed": len(results),
         "duplicates": len(duplicates),
+        "hot_deals": hot_deals,
+        "vision_used": use_vision,
         "results": results,
         "duplicate_warnings": duplicates
     }
@@ -434,7 +710,7 @@ async def get_review_queue(state: Optional[str] = None, county: Optional[str] = 
 
 
 @api_router.post("/review-queue/action")
-async def review_queue_action(approval: UnitApproval):
+async def review_queue_action(approval: UnitApproval, background_tasks: BackgroundTasks):
     """Approve, reject, or edit a unit in the review queue"""
     unit = await db.analyzed_units.find_one({"auction_id": approval.unit_id}, {"_id": 0})
     if not unit:
@@ -442,6 +718,26 @@ async def review_queue_action(approval: UnitApproval):
     
     if approval.action == "approve":
         new_status = "published"
+        
+        # Check if it's a hot deal and notify subscribers
+        optimizer = unit.get("optimizer_analysis", {})
+        if optimizer.get("final_recommendation", {}).get("verdict") == "GO":
+            # Get all pro/enterprise subscribers
+            subscriptions = await db.push_subscriptions.find({}, {"_id": 0}).to_list(100)
+            hunter = unit.get("hunter_analysis", {})
+            
+            for sub in subscriptions:
+                user = await db.users.find_one({"user_id": sub["user_id"]}, {"_id": 0, "tier": 1})
+                if user and user.get("tier") in ["pro", "enterprise"]:
+                    background_tasks.add_task(
+                        send_hot_deal_notification,
+                        sub["subscription"],
+                        hunter.get("facility_name", "Storage Unit"),
+                        int(optimizer.get("final_recommendation", {}).get("expected_profit", {}).get("mid", 0) / 
+                            max(hunter.get("current_bid", 1), 1) * 100),
+                        optimizer.get("final_recommendation", {}).get("max_bid", 0)
+                    )
+        
     elif approval.action == "reject":
         new_status = "rejected"
     else:
@@ -475,51 +771,52 @@ async def get_published_units(state: Optional[str] = None, county: Optional[str]
 
 
 @api_router.get("/my-bids")
-async def get_my_bids():
+async def get_my_bids(user_id: str = "default"):
     """Get user's saved bids"""
-    bids = await db.my_bids.find({}, {"_id": 0}).sort("added_at", -1).to_list(100)
+    bids = await db.my_bids.find({"user_id": user_id}, {"_id": 0}).sort("added_at", -1).to_list(100)
     return {"bids": bids, "count": len(bids)}
 
 
 @api_router.post("/my-bids/add")
-async def add_to_my_bids(unit_id: str):
+async def add_to_my_bids(unit_id: str, user_id: str = "default"):
     """Add a published unit to My Bids"""
     unit = await db.analyzed_units.find_one({"auction_id": unit_id}, {"_id": 0})
     if not unit:
         raise HTTPException(status_code=404, detail="Unit not found")
     
     # Check if already in my bids
-    existing = await db.my_bids.find_one({"auction_id": unit_id})
+    existing = await db.my_bids.find_one({"auction_id": unit_id, "user_id": user_id})
     if existing:
         return {"success": False, "message": "Already in My Bids"}
     
     bid_entry = {
         **unit,
+        "user_id": user_id,
         "added_at": datetime.now(timezone.utc).isoformat()
     }
-    await db.my_bids.insert_one({**bid_entry, "_id": unit_id})
+    await db.my_bids.insert_one({**bid_entry, "_id": f"{user_id}_{unit_id}"})
     
     return {"success": True, "message": "Added to My Bids"}
 
 
 @api_router.delete("/my-bids/{unit_id}")
-async def remove_from_my_bids(unit_id: str):
+async def remove_from_my_bids(unit_id: str, user_id: str = "default"):
     """Remove a unit from My Bids"""
-    result = await db.my_bids.delete_one({"auction_id": unit_id})
+    result = await db.my_bids.delete_one({"auction_id": unit_id, "user_id": user_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Unit not found in My Bids")
     return {"success": True, "message": "Removed from My Bids"}
 
 
 @api_router.get("/stats")
-async def get_stats():
+async def get_stats(user_id: str = "default"):
     """Get dashboard stats"""
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     
     total_units = await db.analyzed_units.count_documents({})
     pending_review = await db.analyzed_units.count_documents({"status": "pending_review"})
     published = await db.analyzed_units.count_documents({"status": "published"})
-    my_bids_count = await db.my_bids.count_documents({})
+    my_bids_count = await db.my_bids.count_documents({"user_id": user_id})
     
     # Units scanned today
     scanned_today = await db.analyzed_units.count_documents({
@@ -528,7 +825,7 @@ async def get_stats():
     
     # Calculate potential profit from my bids (only fetch required fields for performance)
     my_bids = await db.my_bids.find(
-        {}, 
+        {"user_id": user_id}, 
         {"_id": 0, "optimizer_analysis.final_recommendation.expected_profit": 1}
     ).to_list(100)
     potential_profit = 0
@@ -538,13 +835,21 @@ async def get_stats():
             profit_range = optimizer["final_recommendation"].get("expected_profit", {})
             potential_profit += profit_range.get("mid", 0)
     
+    # Get user tier info
+    tier = await get_user_tier(user_id)
+    tier_config = get_tier_config(tier)
+    user_scans_today = await get_user_scans_today(user_id)
+    
     return {
         "total_units": total_units,
         "pending_review": pending_review,
         "published": published,
         "my_bids": my_bids_count,
         "scanned_today": scanned_today,
-        "potential_profit": potential_profit
+        "potential_profit": potential_profit,
+        "user_tier": tier.value,
+        "user_scans_today": user_scans_today,
+        "scans_remaining": "Unlimited" if tier_config["scans_per_day"] == -1 else max(0, tier_config["scans_per_day"] - user_scans_today)
     }
 
 

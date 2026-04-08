@@ -7,6 +7,8 @@ import { Dashboard } from "./pages/Dashboard";
 import { Scan } from "./pages/Scan";
 import { MyBids } from "./pages/MyBids";
 import { Admin } from "./pages/Admin";
+import { Pricing } from "./pages/Pricing";
+import { SubscriptionSuccess, SubscriptionCancel } from "./pages/SubscriptionPages";
 
 function App() {
   return (
@@ -22,6 +24,9 @@ function App() {
             <Route path="/scan" element={<Scan />} />
             <Route path="/my-bids" element={<MyBids />} />
             <Route path="/admin" element={<Admin />} />
+            <Route path="/pricing" element={<Pricing />} />
+            <Route path="/subscription/success" element={<SubscriptionSuccess />} />
+            <Route path="/subscription/cancel" element={<SubscriptionCancel />} />
           </Routes>
         </main>
         

@@ -9,6 +9,9 @@ const STORAGE_KEYS = {
   SETTINGS: 'sh_settings',
   HOT_DEAL_SETTINGS: 'sh_hot_deal_settings',
   IS_ADMIN_UNLOCKED: 'sh_admin_unlocked',
+  USER_ID: 'sh_user_id',
+  USER_TIER: 'sh_user_tier',
+  PUSH_ENABLED: 'sh_push_enabled',
 };
 
 // Default settings
@@ -65,6 +68,14 @@ export const setAdminPin = (pin) => setItem(STORAGE_KEYS.ADMIN_PIN, pin);
 export const isAdminUnlocked = () => getItem(STORAGE_KEYS.IS_ADMIN_UNLOCKED, false);
 export const setAdminUnlocked = (unlocked) => setItem(STORAGE_KEYS.IS_ADMIN_UNLOCKED, unlocked);
 
+// User functions
+export const getUserId = () => getItem(STORAGE_KEYS.USER_ID, 'default');
+export const setUserId = (id) => setItem(STORAGE_KEYS.USER_ID, id);
+export const getUserTier = () => getItem(STORAGE_KEYS.USER_TIER, 'free');
+export const setUserTier = (tier) => setItem(STORAGE_KEYS.USER_TIER, tier);
+export const isPushEnabled = () => getItem(STORAGE_KEYS.PUSH_ENABLED, false);
+export const setPushEnabled = (enabled) => setItem(STORAGE_KEYS.PUSH_ENABLED, enabled);
+
 // Settings functions
 export const getSettings = () => getItem(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS);
 export const setSettings = (settings) => setItem(STORAGE_KEYS.SETTINGS, { ...DEFAULT_SETTINGS, ...settings });
@@ -79,18 +90,37 @@ export const setHotDealSettings = (settings) => setItem(STORAGE_KEYS.HOT_DEAL_SE
 
 // ============ API FUNCTIONS ============
 
-// Scan auctions with AI agents
-export const scanAuctions = async (urls, stateFilter = null, countyFilter = null) => {
+// Get app config (VAPID key, tiers)
+export const getAppConfig = async () => {
   try {
-    const response = await fetch(`${API}/scan`, {
+    const response = await fetch(`${API}/config`);
+    return await response.json();
+  } catch (error) {
+    console.error('Get config error:', error);
+    throw error;
+  }
+};
+
+// Scan auctions with AI agents
+export const scanAuctions = async (urls, stateFilter = null, countyFilter = null, useVision = true) => {
+  try {
+    const userId = getUserId();
+    const response = await fetch(`${API}/scan?user_id=${userId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         urls: urls,
         state_filter: stateFilter,
-        county_filter: countyFilter
+        county_filter: countyFilter,
+        use_vision: useVision
       })
     });
+    
+    if (response.status === 429) {
+      const data = await response.json();
+      throw new Error(data.detail || 'Scan limit reached');
+    }
+    
     return await response.json();
   } catch (error) {
     console.error('Scan error:', error);
@@ -154,7 +184,8 @@ export const getPublishedUnits = async (state = null, county = null) => {
 // Get my bids from API
 export const getMyBidsAPI = async () => {
   try {
-    const response = await fetch(`${API}/my-bids`);
+    const userId = getUserId();
+    const response = await fetch(`${API}/my-bids?user_id=${userId}`);
     return await response.json();
   } catch (error) {
     console.error('Get my bids error:', error);
@@ -165,7 +196,8 @@ export const getMyBidsAPI = async () => {
 // Add to my bids via API
 export const addToMyBidsAPI = async (unitId) => {
   try {
-    const response = await fetch(`${API}/my-bids/add?unit_id=${unitId}`, {
+    const userId = getUserId();
+    const response = await fetch(`${API}/my-bids/add?unit_id=${unitId}&user_id=${userId}`, {
       method: 'POST'
     });
     return await response.json();
@@ -178,7 +210,8 @@ export const addToMyBidsAPI = async (unitId) => {
 // Remove from my bids via API
 export const removeFromMyBidsAPI = async (unitId) => {
   try {
-    const response = await fetch(`${API}/my-bids/${unitId}`, {
+    const userId = getUserId();
+    const response = await fetch(`${API}/my-bids/${unitId}?user_id=${userId}`, {
       method: 'DELETE'
     });
     return await response.json();
@@ -191,13 +224,111 @@ export const removeFromMyBidsAPI = async (unitId) => {
 // Get dashboard stats
 export const getStats = async () => {
   try {
-    const response = await fetch(`${API}/stats`);
+    const userId = getUserId();
+    const response = await fetch(`${API}/stats?user_id=${userId}`);
     return await response.json();
   } catch (error) {
     console.error('Get stats error:', error);
     throw error;
   }
 };
+
+// Get subscription tiers
+export const getSubscriptionTiers = async () => {
+  try {
+    const response = await fetch(`${API}/subscription/tiers`);
+    return await response.json();
+  } catch (error) {
+    console.error('Get tiers error:', error);
+    throw error;
+  }
+};
+
+// Create subscription order
+export const createSubscriptionOrder = async (tier, returnUrl, cancelUrl) => {
+  try {
+    const userId = getUserId();
+    const response = await fetch(`${API}/subscription/create-order?user_id=${userId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tier: tier,
+        return_url: returnUrl,
+        cancel_url: cancelUrl
+      })
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Create subscription order error:', error);
+    throw error;
+  }
+};
+
+// Capture subscription
+export const captureSubscription = async (orderId) => {
+  try {
+    const userId = getUserId();
+    const response = await fetch(`${API}/subscription/capture/${orderId}?user_id=${userId}`, {
+      method: 'POST'
+    });
+    const result = await response.json();
+    if (result.tier) {
+      setUserTier(result.tier);
+    }
+    return result;
+  } catch (error) {
+    console.error('Capture subscription error:', error);
+    throw error;
+  }
+};
+
+// Subscribe to push notifications
+export const subscribeToPushNotifications = async (subscription) => {
+  try {
+    const userId = getUserId();
+    const response = await fetch(`${API}/notifications/subscribe?user_id=${userId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint: subscription.endpoint,
+        keys: {
+          p256dh: arrayBufferToBase64(subscription.getKey('p256dh')),
+          auth: arrayBufferToBase64(subscription.getKey('auth'))
+        }
+      })
+    });
+    setPushEnabled(true);
+    return await response.json();
+  } catch (error) {
+    console.error('Subscribe to push error:', error);
+    throw error;
+  }
+};
+
+// Unsubscribe from push notifications
+export const unsubscribeFromPush = async () => {
+  try {
+    const userId = getUserId();
+    const response = await fetch(`${API}/notifications/unsubscribe?user_id=${userId}`, {
+      method: 'DELETE'
+    });
+    setPushEnabled(false);
+    return await response.json();
+  } catch (error) {
+    console.error('Unsubscribe from push error:', error);
+    throw error;
+  }
+};
+
+// Helper: Convert ArrayBuffer to Base64
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 
 // Check if unit is a hot deal based on settings
 export const isHotDeal = (unit) => {

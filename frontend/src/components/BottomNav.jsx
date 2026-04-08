@@ -1,4 +1,4 @@
-import { Home, Search, Gavel, Settings } from 'lucide-react';
+import { Home, Search, Gavel, Settings, CreditCard } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
 
@@ -6,6 +6,7 @@ const navItems = [
   { path: '/', icon: Home, label: 'Home' },
   { path: '/scan', icon: Search, label: 'Scan' },
   { path: '/my-bids', icon: Gavel, label: 'My Bids' },
+  { path: '/pricing', icon: CreditCard, label: 'Plans' },
   { path: '/admin', icon: Settings, label: 'Admin' },
 ];
 
@@ -25,21 +26,21 @@ export const BottomNav = () => {
             onClick={() => navigate(item.path)}
             data-testid={`nav-${item.label.toLowerCase().replace(' ', '-')}`}
             className={cn(
-              'flex flex-col items-center justify-center gap-1 px-4 py-2 rounded-lg transition-all duration-200',
+              'flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-all duration-200',
               isActive 
                 ? 'text-emerald-400' 
                 : 'text-slate-400 hover:text-slate-200'
             )}
           >
             <Icon 
-              size={24} 
+              size={22} 
               className={cn(
                 'transition-all duration-200',
                 isActive && 'drop-shadow-[0_0_8px_rgba(16,185,129,0.5)]'
               )}
             />
             <span className={cn(
-              'text-xs font-medium',
+              'text-[10px] font-medium',
               isActive ? 'text-emerald-400' : 'text-slate-500'
             )}>
               {item.label}
