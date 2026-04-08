@@ -122,7 +122,7 @@ export const scanAuctions = async (urls, stateFilter = null, countyFilter = null
 
     const data = await safeJsonParse(response);
 
-    if (!response.ok) {
+    if (response.ok) {
       if (response.status === 429) {
         throw new Error(data.detail || data.message || 'Scan limit reached. Please try again later.');
       }
