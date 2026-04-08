@@ -5,9 +5,8 @@ export default function handler(req, res) {
   }
 
   try {
-    const { urls = [], state_filter = 'WA', county_filter = 'King' } = req.body;
+    const { urls = [], state_filter = '', county_filter = 'King' } = req.body;
 
-    // Fake data for King County, WA
     const fakeResults = [
       {
         auction_id: "FAKE-KING-001",
@@ -40,15 +39,15 @@ export default function handler(req, res) {
       duplicates: 0,
       results: fakeResults,
       duplicate_warnings: [],
-      message: `✅ Scan completed for King County, WA (Vercel)`,
+      message: "✅ Scan completed successfully (Vercel)",
       analyzed_urls: urls,
       state_filter,
       county_filter
     });
   } catch (error) {
-    return res.status(500).json({
-      error: 'Internal server error',
-      message: error.message
+    return res.status(500).json({ 
+      error: 'Internal server error', 
+      message: error.message 
     });
   }
 }
