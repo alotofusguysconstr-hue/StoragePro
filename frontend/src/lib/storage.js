@@ -104,7 +104,7 @@ export const getAppConfig = async () => {
   return await safeJsonParse(response);
 };
 
-// Scan auctions with AI agents  ← FIXED
+// Scan auctions with AI agents - FIXED & CLEANED
 export const scanAuctions = async (urls, stateFilter = null, countyFilter = null, useVision = true) => {
   try {
     const userId = getUserId();
@@ -120,16 +120,20 @@ export const scanAuctions = async (urls, stateFilter = null, countyFilter = null
       }),
     });
 
+    // Read body ONLY ONCE
     const data = await safeJsonParse(response);
 
-    if (response.ok) {
-      if (response.status === 429) {
-        throw new Error(data.detail || data.message || 'Scan limit reached. Please try again later.');
-      }
-      throw new Error(data.error || data.message || `Server error (${response.status})`);
+    // Correct logic: throw only if NOT ok
+    if (!response.ok) {
+      throw new Error(
+        data.error || 
+        data.message || 
+        data.detail || 
+        `Server error (${response.status})`
+      );
     }
 
-    return data;   // Success - return parsed data
+    return data; // Success
   } catch (error) {
     console.error('Scan error:', error);
     throw error;
@@ -225,9 +229,7 @@ export const captureSubscription = async (orderId) => {
   const response = await fetch(`${API}/subscription/capture/${orderId}?user_id=${userId}`, {
     method: 'POST'
   });
-
   const result = await safeJsonParse(response);
-
   if (result.tier) {
     setUserTier(result.tier);
   }
@@ -248,7 +250,6 @@ export const subscribeToPushNotifications = async (subscription) => {
       }
     })
   });
-
   const result = await safeJsonParse(response);
   setPushEnabled(true);
   return result;
@@ -259,7 +260,6 @@ export const unsubscribeFromPush = async () => {
   const response = await fetch(`${API}/notifications/unsubscribe?user_id=${userId}`, {
     method: 'DELETE'
   });
-
   const result = await safeJsonParse(response);
   setPushEnabled(false);
   return result;
