@@ -14,5 +14,12 @@
       "src": "/(.*)",
       "dest": "/frontend/build/$1"
     }
-  ]
+  ],
+  "env": {
+    "CI": "false",
+    "VITE_GROQ_API_KEY": "",
+    "VITE_OPENAI_API_KEY": "",
+    "VITE_ANTHROPIC_API_KEY": "",
+    "VITE_DEFAULT_LLM_PROVIDER": "groq"
+  }
 }
