@@ -92,7 +92,7 @@ const safeJsonParse = async (response) => {
     return await response.json();
   } catch (e) {
     const text = await response.text().catch(() => '');
-    throw new Error(text || 'Invalid JSON response from server');
+    throw new Error(text || 'Invalid JSON response from seRver');
   }
 };
 
