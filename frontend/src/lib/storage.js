@@ -1,3 +1,4 @@
+// frontend/api/scan.js   ← or wherever this file is (likely src/api/storage.js or similar)
 // LocalStorage utility functions for StorageHunter Pro
 // Now also includes API integration
 
@@ -67,7 +68,6 @@ export const getAdminPin = () => getItem(STORAGE_KEYS.ADMIN_PIN, '1234');
 export const setAdminPin = (pin) => setItem(STORAGE_KEYS.ADMIN_PIN, pin);
 export const isAdminUnlocked = () => getItem(STORAGE_KEYS.IS_ADMIN_UNLOCKED, false);
 export const setAdminUnlocked = (unlocked) => setItem(STORAGE_KEYS.IS_ADMIN_UNLOCKED, unlocked);
-
 export const getUserId = () => getItem(STORAGE_KEYS.USER_ID, 'default');
 export const setUserId = (id) => setItem(STORAGE_KEYS.USER_ID, id);
 export const getUserTier = () => getItem(STORAGE_KEYS.USER_TIER, 'free');
@@ -82,7 +82,6 @@ export const updateSettings = (updates) => {
   const current = getSettings();
   return setSettings({ ...current, ...updates });
 };
-
 export const getHotDealSettings = () => getItem(STORAGE_KEYS.HOT_DEAL_SETTINGS, DEFAULT_HOT_DEAL_SETTINGS);
 export const setHotDealSettings = (settings) => setItem(STORAGE_KEYS.HOT_DEAL_SETTINGS, { ...DEFAULT_HOT_DEAL_SETTINGS, ...settings });
 
@@ -92,43 +91,36 @@ const safeJsonParse = async (response) => {
     return await response.json();
   } catch (e) {
     const text = await response.text().catch(() => '');
-    throw new Error(text || 'Invalid JSON response from seRver');
+    throw new Error(`Invalid JSON response from server: ${text.substring(0, 300)}`);
   }
 };
 
 // ==================== API FUNCTIONS ====================
 
-// Get app config
-export const getAppConfig = async () => {
-  const response = await fetch(`${API}/config`);
-  return await safeJsonParse(response);
-};
-
-// Scan auctions with AI agents - FIXED & CLEANED
+// Scan auctions with AI agents - FIXED
 export const scanAuctions = async (urls, stateFilter = null, countyFilter = null, useVision = true) => {
   try {
     const userId = getUserId();
 
-    const response = await fetch(`${API}/scan?user_id=${userId}`, {
+    const response = await fetch(`${API}/scan`, {   // ← FIXED: Clean URL, no ?user_id
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         urls: Array.isArray(urls) ? urls : urls.split('\n').filter(u => u.trim()),
         state_filter: stateFilter,
         county_filter: countyFilter,
-        use_vision: useVision
+        use_vision: useVision,
+        user_id: userId   // ← Send as body instead of query param
       }),
     });
 
-    // Read body ONLY ONCE
     const data = await safeJsonParse(response);
 
-    // Correct logic: throw only if NOT ok
     if (!response.ok) {
       throw new Error(
-        data.error || 
-        data.message || 
-        data.detail || 
+        data.error ||
+        data.message ||
+        data.detail ||
         `Server error (${response.status})`
       );
     }
@@ -140,6 +132,12 @@ export const scanAuctions = async (urls, stateFilter = null, countyFilter = null
   }
 };
 
+// Get app config
+export const getAppConfig = async () => {
+  const response = await fetch(`${API}/config`);
+  return await safeJsonParse(response);
+};
+
 // Get review queue (Admin)
 export const getReviewQueue = async (state = null, county = null) => {
   let url = `${API}/review-queue`;
@@ -147,7 +145,6 @@ export const getReviewQueue = async (state = null, county = null) => {
   if (state) params.append('state', state);
   if (county) params.append('county', county);
   if (params.toString()) url += `?${params.toString()}`;
-
   const response = await fetch(url);
   return await safeJsonParse(response);
 };
@@ -169,7 +166,6 @@ export const getPublishedUnits = async (state = null, county = null) => {
   if (state) params.append('state', state);
   if (county) params.append('county', county);
   if (params.toString()) url += `?${params.toString()}`;
-
   const response = await fetch(url);
   return await safeJsonParse(response);
 };
@@ -279,18 +275,14 @@ function arrayBufferToBase64(buffer) {
 export const isHotDeal = (unit) => {
   const settings = getHotDealSettings();
   if (!settings.enabled) return false;
-
   const optimizer = unit?.optimizer_analysis;
   if (!optimizer || !optimizer.final_recommendation) return false;
-
   const hunter = unit?.hunter_analysis;
   const estimatedValue = hunter?.estimated_value?.mid || 0;
   const currentBid = hunter?.current_bid || 0;
-
   const profitRange = optimizer.final_recommendation.expected_profit || {};
   const expectedProfit = profitRange.mid || 0;
   const profitPercent = currentBid > 0 ? (expectedProfit / currentBid) * 100 : 0;
-
   return (
     profitPercent >= settings.minProfitPercent &&
     estimatedValue >= settings.minEstimatedValue &&
